@@ -321,8 +321,7 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
 }
 
 // Reconstruct path from end word back to begin word
-vector<int> reconstruct_path(int begin_word_id, int end_word_id) {
-    vector<int> path;
+void reconstruct_path(int begin_word_id, int end_word_id, vector <int> &path) {
     int current = end_word_id;
     
     while (current != begin_word_id) {
@@ -332,7 +331,6 @@ vector<int> reconstruct_path(int begin_word_id, int end_word_id) {
     path.push_back(begin_word_id);
     
     reverse(path.begin(), path.end());
-    return path;
 }
 
 // BFS implementation
@@ -576,7 +574,8 @@ int main(int argc, char* argv[]) {
     
     if (found) {
         // Reconstruct and output the path
-        vector<int> path = reconstruct_path(begin_word_id, end_word_id);
+        vector<int> path;
+        reconstruct_path(begin_word_id, end_word_id, path);
         
         if (config.word_output) {
             output_word_format(path);
