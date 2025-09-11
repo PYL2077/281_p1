@@ -3,9 +3,20 @@
 ### Tuesday
 - chem labflow (9.12) **(DONE)**
 ### Wednesday
-- 281 proj finish
 - ASTRO quiz 1 **(DONE)**
+
+### Thursday
+- 370 lecture (1/2)
+- 281 proj finish
+- submit google internship
 - 370 lab test
+
+### Friday
+- 370 p1s/m
+- draft cover letter
+- 281 lecture (0/2)
+
+
 ### Recent
 
 - draft cover letter (9.14)
