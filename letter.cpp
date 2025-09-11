@@ -16,17 +16,19 @@ using namespace std;
 vector<string> dictionary;
 vector<int> original_order; // Maps sorted index back to original dictionary order
 
-struct WordInfo {
-    int parent;
-    bool discovered;
+// Split data structures for memory efficiency
+vector<int> parent_info;       // Always needed for path reconstruction
+vector<bool> discovered;       // Always needed to avoid revisiting
+
+// Modification details - only allocated for modification output
+struct ModificationInfo {
     unsigned char modification_type;  // 0=none, 1=c, 2=i, 3=d, 4=s
     unsigned char modification_pos;
     char modification_char;
     
-    WordInfo() : parent(-1), discovered(false), modification_type(0), modification_pos(0), modification_char(' ') {}
+    ModificationInfo() : modification_type(0), modification_pos(0), modification_char(' ') {}
 };
-
-vector<WordInfo> word_info;
+vector<ModificationInfo> mod_info; // Only used for modification output
 
 struct Config {
     bool use_stack = false;
@@ -156,8 +158,15 @@ void prepare_dictionary_for_search() {
         original_order.push_back(pair.second);
     }
     
-    // Resize word_info to match final dictionary size
-    word_info.resize(dictionary.size());
+    // Initialize data structures based on output mode
+    int dict_size = static_cast<int>(dictionary.size());
+    parent_info.resize(dict_size, -1);
+    discovered.resize(dict_size, false);
+    
+    // Only allocate modification info if needed
+    if (!config.word_output) {
+        mod_info.resize(dict_size);
+    }
 }
 
 void read_dictionary() {
@@ -228,7 +237,7 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     assert(!word.empty());
     assert(neighbors.empty());
     assert(current_word_id >= 0 && current_word_id < static_cast<int>(dictionary.size()));
-    assert(word_info[current_word_id].discovered);
+    assert(discovered[current_word_id]);
     
     // Pre-allocate reusable string buffer to avoid repeated allocations
     string working_buffer;
@@ -243,13 +252,17 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                     working_buffer[i] = c;
                     
                     int new_word_id = find_word_id(working_buffer);
-                    if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                    if (new_word_id != -1 && !discovered[new_word_id]) {
                         neighbors.push_back(new_word_id);
-                        word_info[new_word_id].discovered = true;
-                        word_info[new_word_id].parent = current_word_id;
-                        word_info[new_word_id].modification_type = 1; // 'c'
-                        word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
-                        word_info[new_word_id].modification_char = c;
+                        discovered[new_word_id] = true;
+                        parent_info[new_word_id] = current_word_id;
+                        
+                        // Only store modification details if needed
+                        if (!config.word_output) {
+                            mod_info[new_word_id].modification_type = 1; // 'c'
+                            mod_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
+                            mod_info[new_word_id].modification_char = c;
+                        }
                     }
                 }
             }
@@ -265,22 +278,26 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                 working_buffer.insert(i, 1, c);
                 
                 int new_word_id = find_word_id(working_buffer);
-                if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                if (new_word_id != -1 && !discovered[new_word_id]) {
                     neighbors.push_back(new_word_id);
-                    word_info[new_word_id].discovered = true;
-                    word_info[new_word_id].parent = current_word_id;
-                    word_info[new_word_id].modification_type = 2; // 'i'
+                    discovered[new_word_id] = true;
+                    parent_info[new_word_id] = current_word_id;
                     
-                    // Find the first difference position between parent and new word
-                    int first_diff = 0;
-                    while (first_diff < static_cast<int>(word.length()) && 
-                           first_diff < static_cast<int>(working_buffer.length()) && 
-                           word[first_diff] == working_buffer[first_diff]) {
-                        first_diff++;
+                    // Only store modification details if needed
+                    if (!config.word_output) {
+                        mod_info[new_word_id].modification_type = 2; // 'i'
+                        
+                        // Find the first difference position between parent and new word
+                        int first_diff = 0;
+                        while (first_diff < static_cast<int>(word.length()) && 
+                               first_diff < static_cast<int>(working_buffer.length()) && 
+                               word[first_diff] == working_buffer[first_diff]) {
+                            first_diff++;
+                        }
+                        
+                        mod_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
+                        mod_info[new_word_id].modification_char = c;
                     }
-                    
-                    word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
-                    word_info[new_word_id].modification_char = c;
                 }
             }
         }
@@ -291,21 +308,25 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             working_buffer.erase(i, 1);
             
             int new_word_id = find_word_id(working_buffer);
-            if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+            if (new_word_id != -1 && !discovered[new_word_id]) {
                 neighbors.push_back(new_word_id);
-                word_info[new_word_id].discovered = true;
-                word_info[new_word_id].parent = current_word_id;
-                word_info[new_word_id].modification_type = 3; // 'd'
+                discovered[new_word_id] = true;
+                parent_info[new_word_id] = current_word_id;
                 
-                // Find the first difference position between parent and new word
-                int first_diff = 0;
-                while (first_diff < static_cast<int>(working_buffer.length()) && 
-                       first_diff < static_cast<int>(word.length()) && 
-                       working_buffer[first_diff] == word[first_diff]) {
-                    first_diff++;
+                // Only store modification details if needed
+                if (!config.word_output) {
+                    mod_info[new_word_id].modification_type = 3; // 'd'
+                    
+                    // Find the first difference position between parent and new word
+                    int first_diff = 0;
+                    while (first_diff < static_cast<int>(working_buffer.length()) && 
+                           first_diff < static_cast<int>(word.length()) && 
+                           working_buffer[first_diff] == word[first_diff]) {
+                        first_diff++;
+                    }
+                    
+                    mod_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
                 }
-                
-                word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
             }
         }
     }
@@ -317,12 +338,16 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             swap(working_buffer[i], working_buffer[i + 1]);
             
             int new_word_id = find_word_id(working_buffer);
-            if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+            if (new_word_id != -1 && !discovered[new_word_id]) {
                 neighbors.push_back(new_word_id);
-                word_info[new_word_id].discovered = true;
-                word_info[new_word_id].parent = current_word_id;
-                word_info[new_word_id].modification_type = 4; // 's'
-                word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
+                discovered[new_word_id] = true;
+                parent_info[new_word_id] = current_word_id;
+                
+                // Only store modification details if needed
+                if (!config.word_output) {
+                    mod_info[new_word_id].modification_type = 4; // 's'
+                    mod_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
+                }
             }
         }
     }
@@ -339,7 +364,7 @@ void reconstruct_path(int begin_word_id, int end_word_id, vector <int> &path) {
     
     while (current != begin_word_id) {
         path.push_back(current);
-        current = word_info[current].parent;
+        current = parent_info[current];
     }
     path.push_back(begin_word_id);
     
@@ -354,7 +379,7 @@ bool search_bfs() {
     
     // Initialize with begin word
     search_container.push_back(begin_word_id);
-    word_info[begin_word_id].discovered = true;
+    discovered[begin_word_id] = true;
     
     int end_word_id = find_word_id(config.end_word);
     
@@ -394,7 +419,7 @@ bool search_dfs() {
     
     // Initialize with begin word
     search_container.push_back(begin_word_id);
-    word_info[begin_word_id].discovered = true;
+    discovered[begin_word_id] = true;
     
     int end_word_id = find_word_id(config.end_word);
     
@@ -439,7 +464,7 @@ void output_modification_format(const vector<int>& path) {
     cout << dictionary[path[0]] << "\n"; // Start word
     
     for (size_t i = 1; i < path.size(); ++i) {
-        const WordInfo& info = word_info[path[i]];
+        const ModificationInfo& info = mod_info[path[i]];
         
         if (info.modification_type == 1) { // 'c'
             cout << "c," << static_cast<int>(info.modification_pos) << "," << info.modification_char << "\n";
@@ -600,8 +625,8 @@ int main(int argc, char* argv[]) {
     {
         // Count discovered words for "No solution" message
         int discovered_count = 0;
-        for (const WordInfo& info : word_info) {
-            if (info.discovered) {
+        for (bool disc : discovered) {
+            if (disc) {
                 discovered_count++;
             }
         }
