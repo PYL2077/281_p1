@@ -14,7 +14,7 @@ using namespace std;
 
 // Global variables
 vector<string> dictionary;
-unordered_map<string, int> word_to_id;
+vector<int> original_order; // Maps sorted index back to original dictionary order
 
 struct WordInfo {
     int parent;
@@ -60,12 +60,8 @@ void print_help() {
 }
 
 inline void add_word_to_dictionary(const string& word) {
-    if (word_to_id.find(word) == word_to_id.end()) {
-        int word_id = static_cast<int>(dictionary.size());
-        dictionary.push_back(word);
-        word_to_id[word] = word_id;
-        word_info.resize(dictionary.size());
-    }
+    // Just add to dictionary - we'll sort and create mappings later
+    dictionary.push_back(word);
 }
 
 void process_complex_word(const string& word) {
@@ -74,10 +70,8 @@ void process_complex_word(const string& word) {
     if (word.back() == '&') {
         string base = word.substr(0, word.length() - 1);
         add_word_to_dictionary(base);
-        // result.push_back(base);
         string reversed = base;
         reverse(reversed.begin(), reversed.end());
-        // result.push_back(reversed);
         add_word_to_dictionary(reversed);
         return;
     }
@@ -91,7 +85,6 @@ void process_complex_word(const string& word) {
         string chars = word.substr(open_bracket + 1, close_bracket - open_bracket - 1);
         
         for (char c : chars) {
-            // result.push_back(prefix + c + suffix);
             add_word_to_dictionary(prefix + c + suffix);
         }
         return;
@@ -101,13 +94,11 @@ void process_complex_word(const string& word) {
     size_t exclamation = word.find('!');
     if (exclamation != string::npos && exclamation >= 2) {
         string base = word.substr(0, exclamation) + word.substr(exclamation + 1);
-        // result.push_back(base);
         add_word_to_dictionary(base);
         
         // Create swapped version
         string swapped = base;
         swap(swapped[exclamation - 2], swapped[exclamation - 1]);
-        // result.push_back(swapped);
         add_word_to_dictionary(swapped);
         return;
     }
@@ -116,24 +107,57 @@ void process_complex_word(const string& word) {
     size_t question = word.find('?');
     if (question != string::npos && question >= 1) {
         string base = word.substr(0, question) + word.substr(question + 1);
-        // result.push_back(base);
         add_word_to_dictionary(base);
 
         // Create doubled version
         string doubled = word.substr(0, question) + word[question - 1] + word.substr(question + 1);
-        // result.push_back(doubled);
         add_word_to_dictionary(doubled);
         return;
     }
     
     // No special characters, just return the word as-is
-    // result.push_back(word);
     add_word_to_dictionary(word);
 }
 
 inline int find_word_id(const string& word) {
-    auto it = word_to_id.find(word);
-    return (it != word_to_id.end()) ? it->second : -1;
+    // Binary search on sorted dictionary
+    auto it = lower_bound(dictionary.begin(), dictionary.end(), word);
+    if (it != dictionary.end() && *it == word) {
+        return static_cast<int>(it - dictionary.begin());
+    }
+    return -1;
+}
+
+void prepare_dictionary_for_search() {
+    // Remove duplicates while preserving original order mapping
+    vector<pair<string, int>> word_with_order;
+    for (int i = 0; i < static_cast<int>(dictionary.size()); ++i) {
+        word_with_order.push_back({dictionary[i], i});
+    }
+    
+    // Sort by word to remove duplicates
+    sort(word_with_order.begin(), word_with_order.end());
+    
+    // Remove duplicates
+    auto last = unique(word_with_order.begin(), word_with_order.end(),
+                      [](const pair<string, int>& a, const pair<string, int>& b) {
+                          return a.first == b.first;
+                      });
+    word_with_order.erase(last, word_with_order.end());
+    
+    // Rebuild dictionary and original_order mapping
+    dictionary.clear();
+    original_order.clear();
+    dictionary.reserve(word_with_order.size());
+    original_order.reserve(word_with_order.size());
+    
+    for (const auto& pair : word_with_order) {
+        dictionary.push_back(pair.first);
+        original_order.push_back(pair.second);
+    }
+    
+    // Resize word_info to match final dictionary size
+    word_info.resize(dictionary.size());
 }
 
 void read_dictionary() {
@@ -185,12 +209,6 @@ void read_dictionary() {
             
             // Process the line and add all generated words
             process_complex_word(line);
-
-            // vector<string> words;
-            // process_complex_word(line, words);
-            // for (const string& word : words) {
-            //     add_word_to_dictionary(word);
-            // }
         }
     }
     
@@ -198,6 +216,9 @@ void read_dictionary() {
     while (getline(cin, line)) {
         // Just consume and ignore
     }
+    
+    // Prepare dictionary for binary search
+    prepare_dictionary_for_search();
 }
 
 // Generate all possible words from current word based on allowed modifications
@@ -209,9 +230,9 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     assert(current_word_id >= 0 && current_word_id < static_cast<int>(dictionary.size()));
     assert(word_info[current_word_id].discovered);
     
-    // Pre-allocate reusable string buffers to avoid repeated allocations
+    // Pre-allocate reusable string buffer to avoid repeated allocations
     string working_buffer;
-    working_buffer.reserve(word.length() + 5); // Extra space for insertions
+    working_buffer.reserve(word.length() + 5);
     
     // Change mode: change one letter
     if (config.change_mode) {
@@ -221,17 +242,14 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                     working_buffer = word;
                     working_buffer[i] = c;
                     
-                    auto it = word_to_id.find(working_buffer);
-                    if (it != word_to_id.end()) {
-                        int new_word_id = it->second;
-                        if (!word_info[new_word_id].discovered) {
-                            neighbors.push_back(new_word_id);
-                            word_info[new_word_id].discovered = true;
-                            word_info[new_word_id].parent = current_word_id;
-                            word_info[new_word_id].modification_type = 1; // 'c'
-                            word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
-                            word_info[new_word_id].modification_char = c;
-                        }
+                    int new_word_id = find_word_id(working_buffer);
+                    if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                        neighbors.push_back(new_word_id);
+                        word_info[new_word_id].discovered = true;
+                        word_info[new_word_id].parent = current_word_id;
+                        word_info[new_word_id].modification_type = 1; // 'c'
+                        word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
+                        word_info[new_word_id].modification_char = c;
                     }
                 }
             }
@@ -246,26 +264,23 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                 working_buffer = word;
                 working_buffer.insert(i, 1, c);
                 
-                auto it = word_to_id.find(working_buffer);
-                if (it != word_to_id.end()) {
-                    int new_word_id = it->second;
-                    if (!word_info[new_word_id].discovered) {
-                        neighbors.push_back(new_word_id);
-                        word_info[new_word_id].discovered = true;
-                        word_info[new_word_id].parent = current_word_id;
-                        word_info[new_word_id].modification_type = 2; // 'i'
-                        
-                        // Find the first difference position between parent and new word
-                        int first_diff = 0;
-                        while (first_diff < static_cast<int>(word.length()) && 
-                               first_diff < static_cast<int>(working_buffer.length()) && 
-                               word[first_diff] == working_buffer[first_diff]) {
-                            first_diff++;
-                        }
-                        
-                        word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
-                        word_info[new_word_id].modification_char = c;
+                int new_word_id = find_word_id(working_buffer);
+                if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                    neighbors.push_back(new_word_id);
+                    word_info[new_word_id].discovered = true;
+                    word_info[new_word_id].parent = current_word_id;
+                    word_info[new_word_id].modification_type = 2; // 'i'
+                    
+                    // Find the first difference position between parent and new word
+                    int first_diff = 0;
+                    while (first_diff < static_cast<int>(word.length()) && 
+                           first_diff < static_cast<int>(working_buffer.length()) && 
+                           word[first_diff] == working_buffer[first_diff]) {
+                        first_diff++;
                     }
+                    
+                    word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
+                    word_info[new_word_id].modification_char = c;
                 }
             }
         }
@@ -275,25 +290,22 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             working_buffer = word;
             working_buffer.erase(i, 1);
             
-            auto it = word_to_id.find(working_buffer);
-            if (it != word_to_id.end()) {
-                int new_word_id = it->second;
-                if (!word_info[new_word_id].discovered) {
-                    neighbors.push_back(new_word_id);
-                    word_info[new_word_id].discovered = true;
-                    word_info[new_word_id].parent = current_word_id;
-                    word_info[new_word_id].modification_type = 3; // 'd'
-                    
-                    // Find the first difference position between parent and new word
-                    int first_diff = 0;
-                    while (first_diff < static_cast<int>(working_buffer.length()) && 
-                           first_diff < static_cast<int>(word.length()) && 
-                           working_buffer[first_diff] == word[first_diff]) {
-                        first_diff++;
-                    }
-                    
-                    word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
+            int new_word_id = find_word_id(working_buffer);
+            if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                neighbors.push_back(new_word_id);
+                word_info[new_word_id].discovered = true;
+                word_info[new_word_id].parent = current_word_id;
+                word_info[new_word_id].modification_type = 3; // 'd'
+                
+                // Find the first difference position between parent and new word
+                int first_diff = 0;
+                while (first_diff < static_cast<int>(working_buffer.length()) && 
+                       first_diff < static_cast<int>(word.length()) && 
+                       working_buffer[first_diff] == word[first_diff]) {
+                    first_diff++;
                 }
+                
+                word_info[new_word_id].modification_pos = static_cast<unsigned char>(first_diff);
             }
         }
     }
@@ -304,22 +316,21 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             working_buffer = word;
             swap(working_buffer[i], working_buffer[i + 1]);
             
-            auto it = word_to_id.find(working_buffer);
-            if (it != word_to_id.end()) {
-                int new_word_id = it->second;
-                if (!word_info[new_word_id].discovered) {
-                    neighbors.push_back(new_word_id);
-                    word_info[new_word_id].discovered = true;
-                    word_info[new_word_id].parent = current_word_id;
-                    word_info[new_word_id].modification_type = 4; // 's'
-                    word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
-                }
+            int new_word_id = find_word_id(working_buffer);
+            if (new_word_id != -1 && !word_info[new_word_id].discovered) {
+                neighbors.push_back(new_word_id);
+                word_info[new_word_id].discovered = true;
+                word_info[new_word_id].parent = current_word_id;
+                word_info[new_word_id].modification_type = 4; // 's'
+                word_info[new_word_id].modification_pos = static_cast<unsigned char>(i);
             }
         }
     }
     
-    // Sort neighbors by their original dictionary order (which is just their ID order)
-    sort(neighbors.begin(), neighbors.end());
+    // Sort neighbors by their original dictionary order
+    sort(neighbors.begin(), neighbors.end(), [](int a, int b) {
+        return original_order[a] < original_order[b];
+    });
 }
 
 // Reconstruct path from end word back to begin word
