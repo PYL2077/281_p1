@@ -209,15 +209,19 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     assert(current_word_id >= 0 && current_word_id < static_cast<int>(dictionary.size()));
     assert(word_info[current_word_id].discovered);
     
+    // Pre-allocate reusable string buffers to avoid repeated allocations
+    string working_buffer;
+    working_buffer.reserve(word.length() + 5); // Extra space for insertions
+    
     // Change mode: change one letter
     if (config.change_mode) {
         for (size_t i = 0; i < word.length(); ++i) {
             for (char c = 'a'; c <= 'z'; ++c) {
                 if (c != word[i]) {
-                    string new_word = word;
-                    new_word[i] = c;
+                    working_buffer = word;
+                    working_buffer[i] = c;
                     
-                    auto it = word_to_id.find(new_word);
+                    auto it = word_to_id.find(working_buffer);
                     if (it != word_to_id.end()) {
                         int new_word_id = it->second;
                         if (!word_info[new_word_id].discovered) {
@@ -239,12 +243,10 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
         // Insert a letter at each position
         for (size_t i = 0; i <= word.length(); ++i) {
             for (char c = 'a'; c <= 'z'; ++c) {
-                string new_word;
-                new_word.reserve(word.length() + 1);
-                new_word = word;
-                new_word.insert(i, 1, c);
+                working_buffer = word;
+                working_buffer.insert(i, 1, c);
                 
-                auto it = word_to_id.find(new_word);
+                auto it = word_to_id.find(working_buffer);
                 if (it != word_to_id.end()) {
                     int new_word_id = it->second;
                     if (!word_info[new_word_id].discovered) {
@@ -256,8 +258,8 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                         // Find the first difference position between parent and new word
                         int first_diff = 0;
                         while (first_diff < static_cast<int>(word.length()) && 
-                               first_diff < static_cast<int>(new_word.length()) && 
-                               word[first_diff] == new_word[first_diff]) {
+                               first_diff < static_cast<int>(working_buffer.length()) && 
+                               word[first_diff] == working_buffer[first_diff]) {
                             first_diff++;
                         }
                         
@@ -270,10 +272,10 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
         
         // Delete a letter at each position
         for (size_t i = 0; i < word.length(); ++i) {
-            string new_word = word;
-            new_word.erase(i, 1);
+            working_buffer = word;
+            working_buffer.erase(i, 1);
             
-            auto it = word_to_id.find(new_word);
+            auto it = word_to_id.find(working_buffer);
             if (it != word_to_id.end()) {
                 int new_word_id = it->second;
                 if (!word_info[new_word_id].discovered) {
@@ -284,9 +286,9 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                     
                     // Find the first difference position between parent and new word
                     int first_diff = 0;
-                    while (first_diff < static_cast<int>(new_word.length()) && 
+                    while (first_diff < static_cast<int>(working_buffer.length()) && 
                            first_diff < static_cast<int>(word.length()) && 
-                           new_word[first_diff] == word[first_diff]) {
+                           working_buffer[first_diff] == word[first_diff]) {
                         first_diff++;
                     }
                     
@@ -299,10 +301,10 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     // Swap mode: swap adjacent letters
     if (config.swap_mode) {
         for (size_t i = 0; i < word.length() - 1; ++i) {
-            string new_word = word;
-            swap(new_word[i], new_word[i + 1]);
+            working_buffer = word;
+            swap(working_buffer[i], working_buffer[i + 1]);
             
-            auto it = word_to_id.find(new_word);
+            auto it = word_to_id.find(working_buffer);
             if (it != word_to_id.end()) {
                 int new_word_id = it->second;
                 if (!word_info[new_word_id].discovered) {
