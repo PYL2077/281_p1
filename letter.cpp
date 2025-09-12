@@ -18,7 +18,6 @@ vector<int> original_order; // Maps sorted index back to original dictionary ord
 
 // Split data structures for memory efficiency
 vector<int> parent_info;       // Always needed for path reconstruction
-vector<bool> discovered;       // Always needed to avoid revisiting
 
 // Modification details - only allocated for modification output
 struct ModificationInfo {
@@ -86,8 +85,8 @@ void process_complex_word(const string& word) {
         string suffix = word.substr(close_bracket + 1);
         string chars = word.substr(open_bracket + 1, close_bracket - open_bracket - 1);
         
-        for (char c : chars) {
-            add_word_to_dictionary(prefix + c + suffix);
+        for (size_t i = 0; i < chars.length(); ++i) {
+            add_word_to_dictionary(prefix + chars[i] + suffix);
         }
         return;
     }
@@ -123,29 +122,41 @@ void process_complex_word(const string& word) {
 
 inline int find_word_id(const string& word) {
     // Binary search on sorted dictionary
-    auto it = lower_bound(dictionary.begin(), dictionary.end(), word);
-    if (it != dictionary.end() && *it == word) {
-        return static_cast<int>(it - dictionary.begin());
+    int left = 0;
+    int right = static_cast<int>(dictionary.size()) - 1;
+    
+    while (left <= right) {
+        int mid = left + (right - left) / 2;
+        if (dictionary[mid] == word) {
+            return mid;
+        } else if (dictionary[mid] < word) {
+            left = mid + 1;
+        } else {
+            right = mid - 1;
+        }
     }
     return -1;
 }
 
 void prepare_dictionary_for_search() {
     // Remove duplicates while preserving original order mapping
-    vector<pair<string, int>> word_with_order;
+    vector<pair<string, int> > word_with_order;
     for (int i = 0; i < static_cast<int>(dictionary.size()); ++i) {
-        word_with_order.push_back({dictionary[i], i});
+        word_with_order.push_back(make_pair(dictionary[i], i));
     }
     
     // Sort by word to remove duplicates
     sort(word_with_order.begin(), word_with_order.end());
     
     // Remove duplicates
-    auto last = unique(word_with_order.begin(), word_with_order.end(),
-                      [](const pair<string, int>& a, const pair<string, int>& b) {
-                          return a.first == b.first;
-                      });
-    word_with_order.erase(last, word_with_order.end());
+    vector<pair<string, int> >::iterator new_end = word_with_order.begin();
+    for (vector<pair<string, int> >::iterator it = word_with_order.begin(); it != word_with_order.end(); ++it) {
+        if (new_end == word_with_order.begin() || new_end[-1].first != it->first) {
+            *new_end = *it;
+            ++new_end;
+        }
+    }
+    word_with_order.erase(new_end, word_with_order.end());
     
     // Rebuild dictionary and original_order mapping
     dictionary.clear();
@@ -153,15 +164,14 @@ void prepare_dictionary_for_search() {
     dictionary.reserve(word_with_order.size());
     original_order.reserve(word_with_order.size());
     
-    for (const auto& pair : word_with_order) {
-        dictionary.push_back(pair.first);
-        original_order.push_back(pair.second);
+    for (size_t i = 0; i < word_with_order.size(); ++i) {
+        dictionary.push_back(word_with_order[i].first);
+        original_order.push_back(word_with_order[i].second);
     }
     
     // Initialize data structures based on output mode
     int dict_size = static_cast<int>(dictionary.size());
-    parent_info.resize(dict_size, -1);
-    discovered.resize(dict_size, false);
+    parent_info.resize(dict_size, -2);  // -2 means undiscovered
     
     // Only allocate modification info if needed
     if (!config.word_output) {
@@ -237,7 +247,7 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     assert(!word.empty());
     assert(neighbors.empty());
     assert(current_word_id >= 0 && current_word_id < static_cast<int>(dictionary.size()));
-    assert(discovered[current_word_id]);
+    assert(parent_info[current_word_id] != -2); // Must be discovered
     
     // Pre-allocate reusable string buffer to avoid repeated allocations
     string working_buffer;
@@ -252,9 +262,8 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                     working_buffer[i] = c;
                     
                     int new_word_id = find_word_id(working_buffer);
-                    if (new_word_id != -1 && !discovered[new_word_id]) {
+                    if (new_word_id != -1 && parent_info[new_word_id] == -2) {
                         neighbors.push_back(new_word_id);
-                        discovered[new_word_id] = true;
                         parent_info[new_word_id] = current_word_id;
                         
                         // Only store modification details if needed
@@ -278,9 +287,8 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
                 working_buffer.insert(i, 1, c);
                 
                 int new_word_id = find_word_id(working_buffer);
-                if (new_word_id != -1 && !discovered[new_word_id]) {
+                if (new_word_id != -1 && parent_info[new_word_id] == -2) {
                     neighbors.push_back(new_word_id);
-                    discovered[new_word_id] = true;
                     parent_info[new_word_id] = current_word_id;
                     
                     // Only store modification details if needed
@@ -308,9 +316,8 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             working_buffer.erase(i, 1);
             
             int new_word_id = find_word_id(working_buffer);
-            if (new_word_id != -1 && !discovered[new_word_id]) {
+            if (new_word_id != -1 && parent_info[new_word_id] == -2) {
                 neighbors.push_back(new_word_id);
-                discovered[new_word_id] = true;
                 parent_info[new_word_id] = current_word_id;
                 
                 // Only store modification details if needed
@@ -338,9 +345,8 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
             swap(working_buffer[i], working_buffer[i + 1]);
             
             int new_word_id = find_word_id(working_buffer);
-            if (new_word_id != -1 && !discovered[new_word_id]) {
+            if (new_word_id != -1 && parent_info[new_word_id] == -2) {
                 neighbors.push_back(new_word_id);
-                discovered[new_word_id] = true;
                 parent_info[new_word_id] = current_word_id;
                 
                 // Only store modification details if needed
@@ -353,9 +359,15 @@ void generate_neighbors(int current_word_id, vector<int> &neighbors) {
     }
     
     // Sort neighbors by their original dictionary order
-    sort(neighbors.begin(), neighbors.end(), [](int a, int b) {
-        return original_order[a] < original_order[b];
-    });
+    sort(neighbors.begin(), neighbors.end());
+    // Use stable_sort with custom comparison
+    for (int i = 0; i < static_cast<int>(neighbors.size()); ++i) {
+        for (int j = i + 1; j < static_cast<int>(neighbors.size()); ++j) {
+            if (original_order[neighbors[i]] > original_order[neighbors[j]]) {
+                swap(neighbors[i], neighbors[j]);
+            }
+        }
+    }
 }
 
 // Reconstruct path from end word back to begin word
@@ -379,7 +391,7 @@ bool search_bfs() {
     
     // Initialize with begin word
     search_container.push_back(begin_word_id);
-    discovered[begin_word_id] = true;
+    parent_info[begin_word_id] = -1; // -1 means begin word (discovered but no parent)
     
     int end_word_id = find_word_id(config.end_word);
     
@@ -398,11 +410,11 @@ bool search_bfs() {
         generate_neighbors(current_word_id, neighbors);
         
         // Add neighbors to back of container (queue behavior)
-        for (int neighbor_id : neighbors) {
-            search_container.push_back(neighbor_id);
+        for (size_t i = 0; i < neighbors.size(); ++i) {
+            search_container.push_back(neighbors[i]);
             
             // Check if we found the end word
-            if (neighbor_id == end_word_id) {
+            if (neighbors[i] == end_word_id) {
                 return true;
             }
         }
@@ -419,7 +431,7 @@ bool search_dfs() {
     
     // Initialize with begin word
     search_container.push_back(begin_word_id);
-    discovered[begin_word_id] = true;
+    parent_info[begin_word_id] = -1; // -1 means begin word (discovered but no parent)
     
     int end_word_id = find_word_id(config.end_word);
     
@@ -438,11 +450,11 @@ bool search_dfs() {
         generate_neighbors(current_word_id, neighbors);
         
         // Add neighbors to back of container in normal order (stack behavior)
-        for (int neighbor_id : neighbors) {
-            search_container.push_back(neighbor_id);
+        for (size_t i = 0; i < neighbors.size(); ++i) {
+            search_container.push_back(neighbors[i]);
             
             // Check if we found the end word
-            if (neighbor_id == end_word_id) {
+            if (neighbors[i] == end_word_id) {
                 return true;
             }
         }
@@ -454,8 +466,8 @@ bool search_dfs() {
 // Output functions
 void output_word_format(const vector<int>& path) {
     cout << "Words in morph: " << path.size() << "\n";
-    for (int word_id : path) {
-        cout << dictionary[word_id] << "\n";
+    for (size_t i = 0; i < path.size(); ++i) {
+        cout << dictionary[path[i]] << "\n";
     }
 }
 
@@ -483,16 +495,16 @@ Config parse_command_line(int argc, char* argv[]) {
     
     // Define long options
     static struct option long_options[] = {
-        {"help",    no_argument,       nullptr, 'h'},
-        {"queue",   no_argument,       nullptr, 'q'},
-        {"stack",   no_argument,       nullptr, 's'},
-        {"begin",   required_argument, nullptr, 'b'},
-        {"end",     required_argument, nullptr, 'e'},
-        {"output",  required_argument, nullptr, 'o'},
-        {"change",  no_argument,       nullptr, 'c'},
-        {"length",  no_argument,       nullptr, 'l'},
-        {"swap",    no_argument,       nullptr, 'p'},
-        {nullptr,   0,                 nullptr, 0}
+        {"help",    no_argument,       0, 'h'},
+        {"queue",   no_argument,       0, 'q'},
+        {"stack",   no_argument,       0, 's'},
+        {"begin",   required_argument, 0, 'b'},
+        {"end",     required_argument, 0, 'e'},
+        {"output",  required_argument, 0, 'o'},
+        {"change",  no_argument,       0, 'c'},
+        {"length",  no_argument,       0, 'l'},
+        {"swap",    no_argument,       0, 'p'},
+        {0,         0,                 0, 0}
     };
     
     int option_index = 0;
@@ -582,7 +594,7 @@ Config parse_command_line(int argc, char* argv[]) {
 
 int main(int argc, char* argv[]) {
     ios_base::sync_with_stdio(false);
-    cin.tie(nullptr);
+    cin.tie(0);
     
     config = parse_command_line(argc, argv);
     
@@ -625,8 +637,8 @@ int main(int argc, char* argv[]) {
     {
         // Count discovered words for "No solution" message
         int discovered_count = 0;
-        for (bool disc : discovered) {
-            if (disc) {
+        for (size_t i = 0; i < parent_info.size(); ++i) {
+            if (parent_info[i] != -2) { // If not undiscovered
                 discovered_count++;
             }
         }
